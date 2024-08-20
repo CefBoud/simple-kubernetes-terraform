@@ -1,0 +1,69 @@
+---
+config:
+  inputs: |
+    [INPUT]
+        Name             tail
+        Alias            kube_containers
+        Tag              kube_<namespace_name>_<pod_name>_<container_name>
+        Tag_Regex        (?<pod_name>[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*)_(?<namespace_name>[^_]+)_(?<container_name>.+)-
+        Path             /var/log/containers/*.log
+        Exclude_Path     /var/log/containers/*_kube-system_*.log,/var/log/containers/*_istio-system_*.log,/var/log/containers/*_knative-serving_*.log,/var/log/containers/*_gke-system_*.log,/var/log/containers/*_config-management-system_*.log
+        Mem_Buf_Limit    20MB
+        Skip_Long_Lines  On
+        Refresh_Interval 1
+  customParsers: |
+    [PARSER]
+        Name        containerd
+        Format      regex
+        Regex       ^(?<time>.+) (?<stream>stdout|stderr) [^ ]* (?<log>.*)$
+        Time_Key    time
+        Time_Format %Y-%m-%dT%H:%M:%S.%L%z
+
+    [PARSER]
+        Name        syslog
+        Format      regex
+        Regex       ^\<(?<pri>[0-9]+)\>(?<time>[^ ]* {1,2}[^ ]* [^ ]*) (?<host>[^ ]*) (?<ident>[a-zA-Z0-9_\/\.\-]*)(?:\[(?<pid>[0-9]+)\])?(?:[^\:]*\:)? *(?<message>.*)$
+        Time_Key    time
+        Time_Format %b %d %H:%M:%S
+
+    [PARSER]
+        Name        network-log
+        Format      json
+        Time_Key    timestamp
+        Time_Format %Y-%m-%dT%H:%M:%S.%L%z
+  filters: |
+    [FILTER]
+        Name         parser
+        Match        kube_*
+        Key_Name     log
+        Reserve_Data True
+        Parser       docker
+        Parser       containerd
+
+    [FILTER]
+        Name        modify
+        Match       *
+        Hard_rename log message
+
+    [FILTER]
+        Name         parser
+        Match        kube_*
+        Key_Name     message
+        Reserve_Data True
+        Parser       json
+  outputs: |
+    [OUTPUT]
+        Name opensearch
+        Match *
+        Host opensearch-cluster-master.opensearch.svc.cluster.local
+        Port 9200
+        Retry_Limit 10
+        HTTP_User admin
+        HTTP_Passwd ${opensearch_password}
+        tls On
+        tls.verify Off
+        Index fluent-bit-logs
+        Type _doc
+        Replace_Dots On
+        Buffer_Size 64KB
+        Suppress_Type_Name On
